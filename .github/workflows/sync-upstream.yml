@@ -1,0 +1,106 @@
+name: Sync Upstream
+
+on:
+  # 每天 UTC 02:00 自动同步（约北京时间 10:00）
+  schedule:
+    - cron: "0 2 * * *"
+  # 也可在 Actions 页手动点 Run workflow
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: "上游仓库，格式 owner/repo（留空则用仓库变量 UPSTREAM_REPO）"
+        required: false
+        type: string
+      upstream_branch:
+        description: "上游分支"
+        required: false
+        default: "main"
+        type: string
+      target_branch:
+        description: "本仓库目标分支"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve upstream
+        id: meta
+        run: |
+          UPSTREAM_REPO="${{ inputs.upstream_repo }}"
+          if [ -z "$UPSTREAM_REPO" ]; then
+            UPSTREAM_REPO="${{ vars.UPSTREAM_REPO }}"
+          fi
+          if [ -z "$UPSTREAM_REPO" ]; then
+            echo "::error::请设置仓库变量 UPSTREAM_REPO（如 original-owner/repo），或手动运行时填写 upstream_repo"
+            exit 1
+          fi
+
+          UPSTREAM_BRANCH="${{ inputs.upstream_branch }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+          [ -z "$UPSTREAM_BRANCH" ] && UPSTREAM_BRANCH="main"
+          [ -z "$TARGET_BRANCH" ] && TARGET_BRANCH="main"
+
+          echo "upstream_repo=$UPSTREAM_REPO" >> "$GITHUB_OUTPUT"
+          echo "upstream_branch=$UPSTREAM_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.target_branch }}
+          fetch-depth: 0
+          # 默认 GITHUB_TOKEN 即可推回本 fork
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync from upstream
+        env:
+          UPSTREAM_REPO: ${{ steps.meta.outputs.upstream_repo }}
+          UPSTREAM_BRANCH: ${{ steps.meta.outputs.upstream_branch }}
+          TARGET_BRANCH: ${{ steps.meta.outputs.target_branch }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "${UPSTREAM_BRANCH}"
+          git checkout "${TARGET_BRANCH}"
+
+          BEFORE=$(git rev-parse HEAD)
+          UPSTREAM_SHA=$(git rev-parse "upstream/${UPSTREAM_BRANCH}")
+
+          if [ "$BEFORE" = "$UPSTREAM_SHA" ]; then
+            echo "Already up to date with upstream/${UPSTREAM_BRANCH}."
+            exit 0
+          fi
+
+          # 优先快进；失败说明本地 main 有独有提交，再尝试普通 merge
+          if git merge --ff-only "upstream/${UPSTREAM_BRANCH}"; then
+            echo "Fast-forwarded to upstream/${UPSTREAM_BRANCH}."
+          else
+            echo "Fast-forward not possible; attempting merge..."
+            if ! git merge --no-edit "upstream/${UPSTREAM_BRANCH}"; then
+              echo "::error::与上游合并冲突。请本地解决后推送，或重置本 fork 的 ${TARGET_BRANCH}。"
+              git merge --abort || true
+              exit 1
+            fi
+          fi
+
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            git push origin "${TARGET_BRANCH}"
+            echo "Synced ${BEFORE:0:7} -> ${AFTER:0:7}"
+          else
+            echo "No changes to push."
+          fi
