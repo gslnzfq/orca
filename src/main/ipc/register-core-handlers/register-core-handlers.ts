@@ -58,11 +58,8 @@ import { registerShellHandlers } from '../shell/shell'
 import { registerPetHandlers } from '../pets/pet'
 import { registerPluginHandlers } from '../plugins/plugins'
 import { registerUIHandlers, setTrustedUIRendererWebContentsId } from '../ui'
-import { registerEmulatorFrameStreamHandlers } from '../emulator/emulator-frame-stream'
-import { registerEmulatorVideoStreamHandlers } from '../emulator/emulator-video-stream'
-import { registerEmulatorScrcpyTouchHandler } from '../emulator/emulator-scrcpy-touch'
-import { registerEmulatorScrcpyKeyboardHandler } from '../emulator/emulator-scrcpy-keyboard'
-import { registerSpeechHandlers } from '../speech'
+import { registerLazyEmulatorHandlers } from '../emulator/lazy-emulator-handlers'
+import { registerLazySpeechHandlers } from '../lazy-speech-handlers'
 import { registerTerminalRenderDesyncEvidenceHandler } from '../terminal-views/terminal-render-desync-evidence'
 import { registerOrcaProfileHandlers } from '../profiles/orca-profiles'
 import { registerCodexAccountHandlers } from '../accounts/codex-accounts'
@@ -210,12 +207,7 @@ export async function registerCoreHandlers(
     registerPetHandlers()
     registerSessionHandlers(store, runtime)
     registerUIHandlers(store, { isDashboardPopoutRenderer })
-    registerEmulatorFrameStreamHandlers()
-    registerEmulatorVideoStreamHandlers((id) =>
-      runtime.getEmulatorBridge()?.getIosVideoStreamUrl(id)
-    )
-    registerEmulatorScrcpyTouchHandler()
-    registerEmulatorScrcpyKeyboardHandler()
+    registerLazyEmulatorHandlers((id) => runtime.getEmulatorBridge()?.getIosVideoStreamUrl(id))
     registerWorkspaceSpaceHandlers(store)
     registerWorkspacePortHandlers(store)
     registerLinkPreviewHandlers()
@@ -287,7 +279,7 @@ export async function registerCoreHandlers(
       }
     })
     registerUpdaterHandlers()
-    registerSpeechHandlers(store, commitMessageAgentEnv)
+    registerLazySpeechHandlers(store, commitMessageAgentEnv)
     void hostsReady.catch((error: unknown) =>
       console.warn('[startup] Host initialization failed:', error)
     )
